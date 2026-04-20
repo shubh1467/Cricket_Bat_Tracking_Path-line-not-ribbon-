@@ -22,6 +22,8 @@ pose = mp_pose.Pose()
 cap = cv2.VideoCapture(VIDEO_PATH)
 
 fps = int(cap.get(cv2.CAP_PROP_FPS))
+if fps <= 0:
+    fps = 30
 
 w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -37,11 +39,10 @@ out = cv2.VideoWriter(
 # CALIBRATION
 # -----------------------------
 REAL_BAT_LENGTH = 0.85
-
 meters_per_pixel = None
 
 # -----------------------------
-# TRAIL (ONLY SINGLE TRAIL)
+# TRACKING
 # -----------------------------
 trail = deque(maxlen=1000)
 
@@ -49,7 +50,8 @@ prev_point = None
 
 speed_hist = deque(maxlen=10)
 
-max_speed = 0
+current_speed = 0.0
+max_speed = 0.0
 min_speed = float('inf')
 
 prev_wrist = None
@@ -96,7 +98,7 @@ while True:
             int(wrist.y*h)
         )
 
-        current_wrist = np.array(
+        current_wrist=np.array(
             [wx,wy]
         )
 
@@ -106,21 +108,21 @@ while True:
 
         if prev_wrist is not None:
 
-            current_wrist = (
+            current_wrist=(
                 alpha_wrist*prev_wrist
                 +
                 (1-alpha_wrist)*current_wrist
             )
 
-        prev_wrist = current_wrist
+        prev_wrist=current_wrist
 
-        wx,wy = current_wrist.astype(int)
+        wx,wy=current_wrist.astype(int)
 
         # -------------------------
         # YOLO SEGMENTATION
         # -------------------------
 
-        result_yolo = model(frame)[0]
+        result_yolo=model(frame)[0]
 
         if (
             result_yolo.masks is None
@@ -131,7 +133,7 @@ while True:
             out.write(vis)
             continue
 
-        poly = (
+        poly=(
             result_yolo
             .masks.xy[0]
             .astype(np.int32)
@@ -197,9 +199,7 @@ while True:
             centroid-current_wrist
         )
 
-        norm=np.linalg.norm(
-            direction
-        )
+        norm=np.linalg.norm(direction)
 
         if norm>0:
             direction=direction/norm
@@ -260,7 +260,7 @@ while True:
         )
 
         # -------------------------
-        # SINGLE THIN PATH
+        # SWING PATH
         # -------------------------
 
         trail.append(toe)
@@ -328,35 +328,83 @@ while True:
                 speed_kmph
             )
 
-            smooth_speed=np.mean(
+            current_speed=np.mean(
                 speed_hist
             )
 
             max_speed=max(
                 max_speed,
-                smooth_speed
+                current_speed
             )
 
             min_speed=min(
                 min_speed,
-                smooth_speed
-            )
-
-            cv2.putText(
-                vis,
-                f"Speed: {smooth_speed:.1f} km/h",
-                (20,50),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (0,255,255),
-                2
+                current_speed
             )
 
         prev_point=toe
 
+    # -------------------------
+    # ALWAYS DRAW SPEEDS
+    # (draw every frame)
+    # -------------------------
+
+    cv2.putText(
+        vis,
+        f"Speed: {current_speed:.1f} km/h",
+        (20,50),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.8,
+        (0,255,255),
+        2
+    )
+
+    cv2.putText(
+        vis,
+        f"Max: {max_speed:.1f} km/h",
+        (20,90),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.8,
+        (0,255,0),
+        2
+    )
+
+    if min_speed != float('inf'):
+
+        cv2.putText(
+            vis,
+            f"Min: {min_speed:.1f} km/h",
+            (20,130),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (0,0,255),
+            2
+        )
+
     out.write(vis)
+
+# -----------------------------
+# CLEANUP
+# -----------------------------
 
 cap.release()
 out.release()
 
-print("DONE - ribbon removed, thin swing path only")
+# -----------------------------
+# FINAL TERMINAL OUTPUT
+# -----------------------------
+
+if min_speed == float('inf'):
+    min_speed = 0.0
+
+print("\n=================================")
+print("BAT SWING SPEED SUMMARY")
+print("=================================")
+
+print(f"Max Bat Speed : {max_speed:.2f} km/h")
+print(f"Min Bat Speed : {min_speed:.2f} km/h")
+
+print("Video saved to:")
+print(OUTPUT)
+
+print("DONE")
